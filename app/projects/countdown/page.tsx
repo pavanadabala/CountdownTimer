@@ -1,138 +1,114 @@
-'use client';
+"use client";
 
-import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { auth, db } from '@/lib/firebase-config';
-import { onAuthStateChanged, User } from 'firebase/auth';
-import { doc, getDoc, updateDoc, arrayUnion, serverTimestamp } from 'firebase/firestore';
-import CountdownDisplay from '@/components/countdown-timer/CountdownDisplay';
-import LapButton from '@/components/countdown-timer/LapButton';
-import LapList, { LapRecord } from '@/components/countdown-timer/LapList';
-import LapChart from '@/components/countdown-timer/LapChart';
+import { useState, useEffect } from "react";
+import { useAuth } from "@/context/AuthContext";
+import { db } from "@/lib/firebase";
+import { doc, getDoc, setDoc, updateDoc, arrayUnion, serverTimestamp } from "firebase/firestore";
+import CountdownDisplay from "@/components/countdown/CountdownDisplay";
+import LapList from "@/components/countdown/LapList";
+import LapChart from "@/components/countdown/LapChart";
+import { Play, Pause, RotateCcw, Flag } from "lucide-react";
 
-export default function CountdownTimerPage() {
-    const router = useRouter();
-    const [user, setUser] = useState<User | null>(null);
+interface Lap {
+    id: number;
+    timeRemaining: number;
+    difference: number;
+    timestamp: any;
+}
+
+export default function CountdownPage() {
+    const { user } = useAuth();
+    const [targetDate, setTargetDate] = useState<number>(new Date("2025/12/31 23:59:59").getTime());
+    const [timeLeft, setTimeLeft] = useState(0);
+    const [laps, setLaps] = useState<Lap[]>([]);
     const [loading, setLoading] = useState(true);
-    const [targetDate, setTargetDate] = useState<number>(new Date('2025/12/31 23:59:59').getTime());
-    const [laps, setLaps] = useState<LapRecord[]>([]);
-    const [lastLapTime, setLastLapTime] = useState<number>(new Date().getTime());
 
-    // Check authentication
+    // Load data from Firestore
     useEffect(() => {
-        const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
-            if (!currentUser) {
-                // Not authenticated, redirect to login
-                // For now, we'll just proceed without auth (development mode)
-                setLoading(false);
-                return;
-            }
+        const loadData = async () => {
+            if (user) {
+                try {
+                    const docRef = doc(db, "users", user.uid, "projects", "project1");
+                    const docSnap = await getDoc(docRef);
 
-            setUser(currentUser);
-
-            // Load project data from Firestore
-            try {
-                const projectRef = doc(db, 'users', currentUser.uid, 'projects', 'project1');
-                const projectDoc = await getDoc(projectRef);
-
-                if (projectDoc.exists()) {
-                    const data = projectDoc.data();
-                    setTargetDate(new Date(data.targetDate).getTime());
-
-                    if (data.laps && data.laps.length > 0) {
-                        setLaps(data.laps);
-                        setLastLapTime(data.laps[data.laps.length - 1].timestamp);
+                    if (docSnap.exists()) {
+                        const data = docSnap.data();
+                        setTargetDate(data.targetDate);
+                        setLaps(data.laps || []);
                     }
+                } catch (error) {
+                    console.error("Error loading data:", error);
                 }
-            } catch (error) {
-                console.error('Error loading project data:', error);
             }
-
             setLoading(false);
-        });
-
-        return () => unsubscribe();
-    }, []);
-
-    const handleLap = async () => {
-        const now = new Date().getTime();
-        const currentTimerElement = document.querySelector('[data-timer-display]');
-        const currentTimerText = currentTimerElement?.textContent;
-
-        if (!currentTimerText || currentTimerText.includes('Finished')) {
-            return;
-        }
-
-        const diff = now - lastLapTime;
-        const diffInSeconds = diff / 1000;
-
-        const newLap: LapRecord = {
-            lapNumber: laps.length + 1,
-            timestamp: now,
-            remainingTime: currentTimerText,
-            difference: diffInSeconds
         };
 
-        const updatedLaps = [...laps, newLap];
-        setLaps(updatedLaps);
-        setLastLapTime(now);
+        loadData();
+    }, [user]);
 
-        // Save to Firestore if user is logged in
+    const handleTick = (time: number) => {
+        setTimeLeft(time);
+    };
+
+    const handleLap = async () => {
+        const lastLap = laps[laps.length - 1];
+        const difference = lastLap ? lastLap.timeRemaining - timeLeft : 0;
+
+        const newLap: Lap = {
+            id: laps.length + 1,
+            timeRemaining: timeLeft,
+            difference: difference,
+            timestamp: new Date(),
+        };
+
+        const newLaps = [...laps, newLap];
+        setLaps(newLaps);
+
         if (user) {
             try {
-                const projectRef = doc(db, 'users', user.uid, 'projects', 'project1');
-                await updateDoc(projectRef, {
-                    laps: arrayUnion(newLap),
-                    lapCount: updatedLaps.length,
-                    lastActivity: serverTimestamp()
+                const docRef = doc(db, "users", user.uid, "projects", "project1");
+                await updateDoc(docRef, {
+                    laps: newLaps,
+                    lapCount: newLaps.length,
+                    lastActivity: serverTimestamp(),
                 });
             } catch (error) {
-                console.error('Error saving lap:', error);
+                console.error("Error saving lap:", error);
             }
         }
     };
 
     if (loading) {
-        return (
-            <div className="min-h-screen bg-gradient-to-br from-purple-600 via-purple-700 to-violet-900 flex items-center justify-center">
-                <div className="text-white text-2xl">Loading...</div>
-            </div>
-        );
+        return <div className="min-h-screen flex items-center justify-center">Loading...</div>;
     }
 
     return (
-        <div className="min-h-screen bg-gradient-to-br from-purple-600 via-purple-700 to-violet-900 py-8 px-4">
-            <div className="max-w-6xl mx-auto">
-                {/* Header */}
-                <div className="flex justify-between items-center mb-8">
+        <div className="min-h-screen bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
+            <div className="max-w-3xl mx-auto">
+                <div className="text-center mb-12">
+                    <h1 className="text-3xl font-bold text-gray-900 sm:text-4xl">
+                        Countdown Timer
+                    </h1>
+                    <p className="mt-2 text-gray-600">
+                        Track time and record laps.
+                    </p>
+                </div>
+
+                <CountdownDisplay targetDate={targetDate} onTick={handleTick} />
+
+                <div className="mt-8 flex justify-center space-x-4">
                     <button
-                        onClick={() => router.push('/projects')}
-                        className="px-4 py-2 bg-white/10 hover:bg-white/20 backdrop-blur-sm border border-white/30 
-                       text-white rounded-lg transition-colors"
+                        onClick={handleLap}
+                        className="inline-flex items-center px-6 py-3 border border-transparent text-base font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
                     >
-                        ← Back to Projects
+                        <Flag className="mr-2 h-5 w-5" />
+                        Lap
                     </button>
-                    <h1 className="text-3xl md:text-4xl font-bold text-white">Daily Working Task Countdown</h1>
-                    <div className="w-32"></div> {/* Spacer for centering */}
                 </div>
 
-                {/* Countdown Display */}
-                <div className="mb-8" data-timer-display>
-                    <CountdownDisplay targetDate={targetDate} />
-                </div>
+                {laps.length > 5 && <LapChart laps={laps} />}
 
-                {/* Lap Button */}
-                <div className="flex justify-center mb-12">
-                    <LapButton onLap={handleLap} />
-                </div>
-
-                {/* Lap List */}
-                <div className="mb-8">
-                    <LapList laps={laps} />
-                </div>
-
-                {/* Lap Chart (appears after 5 laps) */}
-                <LapChart laps={laps} />
+                {laps.length > 0 && <LapList laps={laps} />}
             </div>
         </div>
     );

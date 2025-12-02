@@ -18,7 +18,12 @@ export default function LoginPage() {
             await signInWithEmailAndPassword(auth, email, password);
             router.push("/");
         } catch (err: any) {
-            setError(err.message);
+            console.error("Login error:", err.code, err.message);
+            if (err.code === 'auth/invalid-credential' || err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password') {
+                setError("Authentication failed. Please check your email/password or create an account.");
+            } else {
+                setError("An error occurred. Please try again later.");
+            }
         }
     };
 
